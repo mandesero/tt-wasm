@@ -8,7 +8,7 @@ template=/src/templates/csharp/default
 
 request() {
     tt-wasm-builder <<EOF
-{"language":"csharp","operation":"$1","dir":"$project","work":"$work/$1","cache":"$cache","source":"Component.csproj","wit":"world.wit","world":"calc"}
+{"language":"csharp","operation":"$1","dir":"$project","work":"$work/${2:-$1}","cache":"$cache","source":"Component.csproj","wit":"world.wit","world":"calc"}
 EOF
 }
 
@@ -53,6 +53,8 @@ EOF
         request build
         wasm-tools validate "$work/build/component.wasm"
         wasm-tools component wit "$work/build/component.wasm" | grep -F 'export add:'
+        request build rebuild
+        cmp "$work/build/component.wasm" "$work/rebuild/component.wasm"
         ;;
     *)
         echo "usage: $0 fetch|build" >&2

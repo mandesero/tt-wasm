@@ -22,7 +22,8 @@ Tarantool guest SDK and its locked Linux x64 NativeAOT compiler packages.
 ## Build and validate locally
 
 Use Docker with Buildx and a compatible `tt` checkout. The release workflow
-pins the public SDK revision. Pass the SDK directory as a named build context.
+pins a `tt` repository and revision for the SDK. Pass the SDK directory as
+a named build context.
 
 ```sh
 target=python

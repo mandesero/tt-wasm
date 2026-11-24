@@ -8,7 +8,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-tarantool-wasm = { path = ".tt-wasm-sdk-rust" }
+tarantool-wasm = { path = ".tt-wasm/bindings/tarantool-sdk" }
 wit-bindgen-rt = { version = "=0.44.0", features = ["bitflags"] }
 
 [package.metadata.component]

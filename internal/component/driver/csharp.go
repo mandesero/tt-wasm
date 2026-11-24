@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -182,7 +183,7 @@ func buildCSharp(ctx context.Context, run executor, req Request) error {
 		return err
 	}
 
-	req, release, err := csharpBuildPaths(req)
+	req, release, err := buildPathAliases(req)
 	if err != nil {
 		return err
 	}
@@ -224,7 +225,7 @@ func buildCSharp(ctx context.Context, run executor, req Request) error {
 		return err
 	}
 
-	outputs, err := filepath.Glob(filepath.Join(publish, "*.wasm"))
+	outputs, err := fs.Glob(os.DirFS(publish), "*.wasm")
 	if err != nil {
 		return fmt.Errorf("looking for C# build output: %w", err)
 	}
@@ -233,49 +234,16 @@ func buildCSharp(ctx context.Context, run executor, req Request) error {
 		return fmt.Errorf("%w in %s, found %d", errCSharpOutput, publish, len(outputs))
 	}
 
-	err = validateComponent(ctx, run, outputs[0])
+	// NativeAOT embeds the disposable working path in DWARF. Keep names
+	// for stack traces and drop DWARF from the Release component.
+	output := filepath.Join(req.Work, OutputFile)
+	err = run.command(ctx, wasmTools, "strip", "--delete", `^\.debug_`,
+		filepath.Join(publish, outputs[0]), "-o", output)
 	if err != nil {
 		return err
 	}
 
-	err = os.Rename(outputs[0], filepath.Join(req.Work, OutputFile))
-	if err != nil {
-		return fmt.Errorf("publishing C# component: %w", err)
-	}
-
-	return nil
-}
-
-// NativeAOT expands an unquoted response-file path. Docker already uses
-// /work; local projects with spaces need a short alias for the same files.
-func csharpBuildPaths(req Request) (Request, func(), error) {
-	if !strings.ContainsAny(req.Work+req.Cache, " \t") {
-		return req, func() {}, nil
-	}
-
-	dir, err := os.MkdirTemp("/tmp", "tt-wasm-csharp-*")
-	if err != nil {
-		return Request{}, nil, fmt.Errorf("creating C# work alias: %w", err)
-	}
-
-	release := func() { _ = os.RemoveAll(dir) }
-	work, cache := filepath.Join(dir, "work"), filepath.Join(dir, "cache")
-
-	err = os.Symlink(req.Work, work)
-	if err == nil {
-		err = os.Symlink(req.Cache, cache)
-	}
-
-	if err != nil {
-		release()
-
-		return Request{}, nil, fmt.Errorf("creating C# work alias: %w", err)
-	}
-
-	req.Work = work
-	req.Cache = cache
-
-	return req, release, nil
+	return validateComponent(ctx, run, output)
 }
 
 type csharpProject struct {

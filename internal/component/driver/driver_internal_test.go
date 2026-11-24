@@ -118,6 +118,26 @@ func TestStageProjectKeepsExplicitSourceUnderDist(t *testing.T) {
 	require.NoDirExists(t, filepath.Join(staged, ".tt-wasm"))
 }
 
+func TestBuildPathAliasesShareStagedFiles(t *testing.T) {
+	t.Parallel()
+
+	req := Request{Work: filepath.Join(t.TempDir(), "with space"), Cache: t.TempDir()}
+	require.NoError(t, os.Mkdir(req.Work, dirPerm))
+	paths, release, err := buildPathAliases(req)
+	require.NoError(t, err)
+	t.Cleanup(release)
+	require.NotContains(t, paths.Work, " ")
+
+	require.NoError(t, os.WriteFile(filepath.Join(paths.Work, "output"), []byte("built"), filePerm))
+	data, err := os.ReadFile(filepath.Join(req.Work, "output"))
+	require.NoError(t, err)
+	require.Equal(t, "built", string(data))
+
+	release()
+	require.NoDirExists(t, filepath.Dir(paths.Work))
+	require.DirExists(t, req.Cache)
+}
+
 func writeExecutable(t *testing.T, dir, name, script string) {
 	t.Helper()
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))

@@ -9,7 +9,8 @@ on:
         default: false
 
 env:
-  TT_SDK_REVISION: b3a4a5fc836ccb65889d3ab11d0cb5f5f750d83a
+  TT_SDK_REPOSITORY: mandesero/tt
+  TT_SDK_REVISION: e336165d7524f13bcd940ad8b9c67da9fdfafb29
   BUILDKIT_IMAGE: moby/buildkit:buildx-stable-1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
   TRIVY_IMAGE: aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
 
@@ -45,6 +46,13 @@ jobs:
             fi
           fi
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: ${{ env.TT_SDK_REPOSITORY }}
+          ref: ${{ env.TT_SDK_REVISION }}
+          path: _tt
+          sparse-checkout: sdk
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -56,9 +64,8 @@ jobs:
         run: |
           cp go.mod go.sum "$RUNNER_TEMP"
           for module in sdk sdk/build sdk/connect sdk/fetch; do
-            module="github.com/tarantool/tt/$module"
-            version=$(go list -m -modfile="$RUNNER_TEMP/go.mod" -f '{{.Version}}' "$module@$TT_SDK_REVISION")
-            go mod edit -modfile="$RUNNER_TEMP/go.mod" "-require=$module@$version"
+            go mod edit -modfile="$RUNNER_TEMP/go.mod" \
+              "-replace=github.com/tarantool/tt/$module=$GITHUB_WORKSPACE/_tt/$module"
           done
           go test -mod=mod -modfile="$RUNNER_TEMP/go.mod" ./...
 
@@ -92,7 +99,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          repository: tarantool/tt
+          repository: ${{ env.TT_SDK_REPOSITORY }}
           ref: ${{ env.TT_SDK_REVISION }}
           path: _tt
           sparse-checkout: sdk/fetch

@@ -20,7 +20,9 @@ const (
 	componentCargoTool = "cargo-component"
 	rustcTool          = "rustc"
 	rustTarget         = "wasm32-wasip1"
-	rustSDK            = ".tt-wasm-sdk-rust"
+	rustSDK            = "tarantool-sdk"
+	rustEditorSDK      = ".tt-wasm/bindings/" + rustSDK
+	rustLegacySDK      = ".tt-wasm-sdk-rust"
 	rustCache          = "dependencies/cargo"
 	rustSDKCache       = "dependencies/rust-sdk"
 	rustLock           = "Cargo.lock"
@@ -188,6 +190,9 @@ func bindRust(ctx context.Context, run executor, req Request) error {
 			filepath.Join(bindings, "bindings.rs"))
 	}
 
+	if err == nil {
+		err = os.Rename(filepath.Join(run.dir, rustEditorSDK), filepath.Join(bindings, rustSDK))
+	}
 	if err != nil {
 		return fmt.Errorf("collecting Rust bindings: %w", err)
 	}
@@ -240,14 +245,12 @@ func stageRust(run executor, req Request) (executor, error) {
 
 	stage := filepath.Join(work, "rust")
 
-	err = stageProject(req.Dir, stage, req.Source)
+	err = stageProject(req.Dir, stage, req.Source, rustLegacySDK)
 	if err != nil {
 		return run, err
 	}
 
-	sdk := filepath.Join(stage, rustSDK)
-
-	err = os.CopyFS(sdk, os.DirFS(filepath.Join(req.Cache, rustSDKCache)))
+	err = stageRustSDK(stage, filepath.Join(req.Cache, rustSDKCache))
 	if err != nil {
 		return run, fmt.Errorf("staging the Rust SDK: %w", err)
 	}
@@ -288,6 +291,18 @@ func stageRust(run executor, req Request) (executor, error) {
 	}
 
 	return run, nil
+}
+
+// stageRustSDK supports both scaffold paths in disposable build trees.
+func stageRustSDK(stage, source string) error {
+	for _, path := range []string{rustEditorSDK, rustLegacySDK} {
+		err := os.CopyFS(filepath.Join(stage, path), os.DirFS(source))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func stageRustWIT(req Request, stage string) error {

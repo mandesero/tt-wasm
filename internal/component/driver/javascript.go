@@ -270,20 +270,25 @@ func checkNPMDeps(data []byte) error {
 }
 
 func installJSSDK(req Request, dest string) error {
-	pattern := filepath.Join(req.Cache, sdkDir, "packages", req.Language, jsSDK+"-*.tgz")
+	packages := filepath.Join(req.Cache, sdkDir, "packages", req.Language)
 
-	matches, err := filepath.Glob(pattern)
+	matches, err := fs.Glob(os.DirFS(packages), jsSDK+"-*.tgz")
 	if err != nil || len(matches) != 1 {
-		return fmt.Errorf("%w: %s", errJSSDK, filepath.Dir(pattern))
+		return fmt.Errorf("%w: %s", errJSSDK, packages)
 	}
 
-	return unpackSDKArchive(matches[0], dest)
+	return unpackSDKArchive(filepath.Join(packages, matches[0]), dest)
 }
 
 func bindJS(ctx context.Context, run executor, req Request) error {
 	wit, err := buildWIT(req)
 	if err != nil {
 		return err
+	}
+
+	err = checkWIT(ctx, run, wit)
+	if err != nil {
+		return fmt.Errorf("checking JavaScript WIT: %w", err)
 	}
 
 	options := []string{"guest-types", wit, jsWorldOption, req.World,
@@ -296,6 +301,11 @@ func buildJS(ctx context.Context, run executor, req Request) error {
 	wit, err := buildWIT(req)
 	if err != nil {
 		return err
+	}
+
+	err = checkWIT(ctx, run, wit)
+	if err != nil {
+		return fmt.Errorf("checking JavaScript WIT: %w", err)
 	}
 
 	project := filepath.Join(req.Work, "project")
@@ -326,6 +336,17 @@ func buildJS(ctx context.Context, run executor, req Request) error {
 	if !slices.ContainsFunc(req.Args, jsSelectsFeatures) {
 		args = append(args, "--disable", "clocks", "http", "random", "fetch-event")
 	}
+
+	// ComponentizeJS passes its temporary initializer path to Wizer as
+	// part of a whitespace-separated argument string.
+	paths, release, err := buildPathAliases(req)
+	if err != nil {
+		return err
+	}
+
+	defer release()
+
+	run.env = append(run.env, "TMPDIR="+filepath.Join(paths.Work, "tmp"))
 
 	err = run.command(ctx, jco, args...)
 	if err != nil {

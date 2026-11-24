@@ -154,7 +154,10 @@ func buildCComponent(ctx context.Context, run executor, req Request, compiler st
 	output := filepath.Join(req.Work, OutputFile)
 	args := append([]string{"-mexec-model=reactor", "-I", dir}, req.Args...)
 
-	err = run.command(ctx, compiler, append(args, "-o", output, "--", source, wrapper, metadata)...)
+	// Resolve project compiler options such as -I and -L from the sources.
+	compile := run
+	compile.dir = req.Dir
+	err = compile.command(ctx, compiler, append(args, "-o", output, "--", source, wrapper, metadata)...)
 	if err != nil {
 		return err
 	}

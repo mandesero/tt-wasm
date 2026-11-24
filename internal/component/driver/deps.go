@@ -82,11 +82,7 @@ func fetchWIT(ctx context.Context, run executor, req Request, staged string) err
 		return err
 	}
 
-	check := run
-
-	check.stdout = io.Discard
-
-	err = check.command(ctx, wasmTools, componentCommand, "wit", filepath.Join(req.Work, witDir))
+	err = checkWIT(ctx, run, filepath.Join(req.Work, witDir))
 	if err != nil {
 		return fmt.Errorf("checking the fetched WIT dependencies: %w", err)
 	}
@@ -97,6 +93,12 @@ func fetchWIT(ctx context.Context, run executor, req Request, staged string) err
 	}
 
 	return nil
+}
+
+func checkWIT(ctx context.Context, run executor, wit string) error {
+	run.stdout = io.Discard
+
+	return run.command(ctx, wasmTools, componentCommand, "wit", wit)
 }
 
 func copyProjectWITDeps(target, component, source string) error {
@@ -187,18 +189,18 @@ func fetchWkg(ctx context.Context, run executor, req Request) error {
 }
 
 func unpackSDK(cache, dest string) error {
-	pattern := filepath.Join(cache, sdkDir, "packages", Python, "twr_python_sdk-*.whl")
+	packages := filepath.Join(cache, sdkDir, "packages", Python)
 
-	matches, err := filepath.Glob(pattern)
+	matches, err := fs.Glob(os.DirFS(packages), "twr_python_sdk-*.whl")
 	if err != nil {
 		return fmt.Errorf("looking up Python SDK: %w", err)
 	}
 
 	if len(matches) != 1 {
-		return fmt.Errorf("%w: expected one wheel in %s", errSDK, filepath.Dir(pattern))
+		return fmt.Errorf("%w: expected one wheel in %s", errSDK, packages)
 	}
 
-	wheel, err := zip.OpenReader(matches[0])
+	wheel, err := zip.OpenReader(filepath.Join(packages, matches[0]))
 	if err != nil {
 		return fmt.Errorf("opening Python SDK wheel: %w", err)
 	}

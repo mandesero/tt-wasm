@@ -37,6 +37,12 @@ EOF
     build)
         run_builder bind
         grep -q 'trait Guest' /work/bind/bindings/bindings.rs
+        test -s /work/bind/bindings/tarantool-sdk/Cargo.toml
+        mkdir -p /work/editor/.tt-wasm/bindings
+        cp "$project/Cargo.toml" "$project/Cargo.lock" /work/editor/
+        cp -R "$project/src" /work/editor/
+        cp -R /work/bind/bindings/tarantool-sdk /work/editor/.tt-wasm/bindings/
+        cargo fetch --locked --offline --target wasm32-wasip1 --manifest-path /work/editor/Cargo.toml
         run_builder build
         wasm-tools validate --features component-model /work/build/component.wasm
         wasm-tools component wit /work/build/component.wasm | grep -q 'export add: func'

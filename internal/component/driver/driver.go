@@ -37,6 +37,7 @@ const (
 	wkg          = "wkg"
 	python       = "python3"
 	checkTimeout = 15 * time.Second
+	toolWait     = 5 * time.Second
 )
 
 var (
@@ -268,7 +269,7 @@ func checkOutput(ctx context.Context, name string, args ...string) ([]byte, erro
 	ctx, cancel := context.WithTimeout(ctx, checkTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := toolCommand(ctx, name, args...)
 
 	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOWORK=off", "GOENV=off")
 
@@ -288,7 +289,7 @@ type executor struct {
 }
 
 func (r executor) command(ctx context.Context, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := toolCommand(ctx, name, args...)
 
 	cmd.Dir = r.dir
 	cmd.Stdout = r.stdout
@@ -304,4 +305,12 @@ func (r executor) command(ctx context.Context, name string, args ...string) erro
 	}
 
 	return nil
+}
+
+func toolCommand(ctx context.Context, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = toolWait
+	isolateTool(cmd)
+
+	return cmd
 }

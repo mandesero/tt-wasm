@@ -11,6 +11,38 @@ import (
 	"strings"
 )
 
+// buildPathAliases gives tools that split paths at whitespace a spelling
+// of the same disposable build directories without whitespace.
+func buildPathAliases(req Request) (Request, func(), error) {
+	if !strings.ContainsAny(req.Work+req.Cache, " \t\r\n") {
+		return req, func() {}, nil
+	}
+
+	dir, err := os.MkdirTemp("/tmp", "tt-wasm-paths-*")
+	if err != nil {
+		return Request{}, nil, fmt.Errorf("creating Wasm build path aliases: %w", err)
+	}
+
+	release := func() { _ = os.RemoveAll(dir) }
+	work, cache := filepath.Join(dir, "work"), filepath.Join(dir, "cache")
+
+	err = os.Symlink(req.Work, work)
+	if err == nil {
+		err = os.Symlink(req.Cache, cache)
+	}
+
+	if err != nil {
+		release()
+
+		return Request{}, nil, fmt.Errorf("creating Wasm build path aliases: %w", err)
+	}
+
+	req.Work = work
+	req.Cache = cache
+
+	return req, release, nil
+}
+
 // stageProject copies source to a disposable work directory. Tool caches
 // and staged bindings are recreated by the driver for the current operation.
 func stageProject(source, destination, entrypoint string, excludedDirs ...string) error {
