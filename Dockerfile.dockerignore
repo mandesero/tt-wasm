@@ -1,0 +1,8 @@
+**
+!cmd/
+!cmd/tt-wasm-builder/
+!cmd/tt-wasm-builder/**
+!internal/
+!internal/component/
+!internal/component/driver/
+!internal/component/driver/**

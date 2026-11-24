@@ -1,0 +1,9 @@
+package main
+
+import world "example.org/ttwasm/go-component/.tt-wasm/bindings/example/{{.World}}/{{.World}}"
+
+func init() {
+	world.Exports.Add = func(a, b int32) int32 { return a + b }
+}
+
+func main() {}

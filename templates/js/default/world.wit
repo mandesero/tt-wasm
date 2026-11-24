@@ -1,0 +1,6 @@
+package {{.Package}};
+
+world {{.World}} {
+    include tarantool:tarantool/guest@0.2.0;
+    export add: func(a: s32, b: s32) -> s32;
+}

@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Component</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RuntimeIdentifier>wasi-wasm</RuntimeIdentifier>
+    <UseAppHost>false</UseAppHost>
+    <PublishTrimmed>true</PublishTrimmed>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SelfContained>true</SelfContained>
+    <IlcExportUnmanagedEntrypoints>true</IlcExportUnmanagedEntrypoints>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode>true</RestoreLockedMode>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BytecodeAlliance.Componentize.DotNet.Wasm.SDK" Version="[0.8.0-preview00011]" />
+    <PackageReference Include="runtime.linux-x64.Microsoft.DotNet.ILCompiler.LLVM" Version="[10.0.0-rc.1.26306.1]" />
+    <!-- tt generates the runtime bindings before invoking MSBuild. -->
+    <Wit Remove="@(Wit)" />
+    <Compile Include="src/**/*.cs" />
+    <Compile Include="$(TTWasmBindingsDir)/**/*.cs" Condition="'$(TTWasmBindingsDir)' != ''" />
+    <TTWasmComponentType Include="$(TTWasmBindingsDir)/*_component_type.wit"
+      Condition="'$(TTWasmBindingsDir)' != ''" />
+    <CustomLinkerArg Include="@(TTWasmComponentType->'-Wl,--component-type,&quot;%(FullPath)&quot;')" />
+  </ItemGroup>
+</Project>

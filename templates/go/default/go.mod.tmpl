@@ -1,0 +1,10 @@
+module example.org/ttwasm/go-component
+
+go 1.27.0
+
+require (
+	github.com/tarantool/tarantool-wasm-rs/guests/go v0.1.0
+	go.bytecodealliance.org/cm v0.3.0
+)
+
+replace github.com/tarantool/tarantool-wasm-rs/guests/go => ./.tt-wasm/bindings/tarantool-sdk
