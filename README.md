@@ -55,10 +55,10 @@ release, require the `sdk`, `sdk/build`, `sdk/connect` and `sdk/fetch`
 modules at the same published `github.com/tarantool/tt` commit. See the
 [SDK versioning guide](https://github.com/tarantool/tt/blob/v3/sdk/README.md#versioning).
 
-## Build a local toolchain image
+## Build and use a toolchain image
 
 ```console
-$ docker build --build-context tt-sdk=../tt/sdk --platform linux/amd64 \
+$ docker buildx build --load --build-context tt-sdk=../tt/sdk --platform linux/amd64 \
     --target python -t tt-wasm-builder:python .
 ```
 
@@ -69,3 +69,9 @@ use the prebuilt image and the tt binary built with this module:
 ```console
 $ PYTEST_ADDOPTS=--tt-cmd=/path/to/tt TT_WASM_TEST_PYTHON_IMAGE=tt-wasm-builder:python test/integration/wasm/run_linux.sh python
 ```
+
+Images are released by language as OCI indexes. C and C++ share one image.
+See [Builder images](docs/builder-images.md) for supported platforms,
+local smoke tests, release publishing, digest-based deployment and rollback.
+The [image audit](docs/builder-image-audit.md) records toolchain coverage
+and the measurements from the migration.

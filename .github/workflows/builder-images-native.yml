@@ -1,0 +1,271 @@
+name: Native Wasm builder images
+
+on:
+  workflow_call:
+    inputs:
+      release:
+        description: Validate a stable release tag and publish its builder images
+        type: boolean
+        default: false
+
+env:
+  TT_SDK_REVISION: b3a4a5fc836ccb65889d3ab11d0cb5f5f750d83a
+  BUILDKIT_IMAGE: moby/buildkit:buildx-stable-1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
+  TRIVY_IMAGE: aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+
+jobs:
+  source:
+    name: Check release source and test Go module
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      revision: ${{ steps.source.outputs.revision }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: ${{ inputs.release && '0' || '1' }}
+          persist-credentials: false
+      - name: Verify source revision
+        id: source
+        env:
+          RELEASE: ${{ inputs.release }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          revision=$(git rev-parse HEAD)
+          if [[ "$RELEASE" == true ]]; then
+            if [[ "$GITHUB_REF_TYPE" != tag || ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "A release requires a vMAJOR.MINOR.PATCH tag." >&2
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$revision" "refs/remotes/origin/$DEFAULT_BRANCH"; then
+              echo "The release commit must be on the history of $DEFAULT_BRANCH." >&2
+              exit 1
+            fi
+          fi
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Test against the pinned tt SDK
+        env:
+          GOWORK: off
+          GOTOOLCHAIN: local
+        run: |
+          cp go.mod go.sum "$RUNNER_TEMP"
+          for module in sdk sdk/build sdk/connect sdk/fetch; do
+            module="github.com/tarantool/tt/$module"
+            version=$(go list -m -modfile="$RUNNER_TEMP/go.mod" -f '{{.Version}}' "$module@$TT_SDK_REVISION")
+            go mod edit -modfile="$RUNNER_TEMP/go.mod" "-require=$module@$version"
+          done
+          go test -mod=mod -modfile="$RUNNER_TEMP/go.mod" ./...
+
+  image:
+    needs: source
+    name: ${{ matrix.target }} / ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [c, go, js, python, rust, csharp]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+        exclude:
+          - target: csharp
+            arch: arm64
+    env:
+      TARGET: ${{ matrix.target }}
+      PLATFORM: linux/${{ matrix.arch }}
+      ARCH: ${{ matrix.arch }}
+      RELEASE: ${{ inputs.release }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.source.outputs.revision }}
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: tarantool/tt
+          ref: ${{ env.TT_SDK_REVISION }}
+          path: _tt
+          sparse-checkout: sdk/fetch
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
+          version: v0.30.1
+      - name: Configure build output
+        run: |
+          if [[ "$RELEASE" == true ]]; then
+            image="ghcr.io/${GITHUB_REPOSITORY,,}-builder-$TARGET"
+            output="type=image,name=$image,push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,rewrite-timestamp=true"
+          else
+            image="tt-wasm-builder:$TARGET"
+            output="type=docker,name=$image"
+          fi
+          {
+            echo "IMAGE=$image"
+            echo "IMAGE_OUTPUT=$output"
+            echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)"
+          } >> "$GITHUB_ENV"
+      - name: Log in to GHCR
+        if: env.RELEASE == 'true'
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Build image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          target: ${{ env.TARGET }}
+          platforms: ${{ env.PLATFORM }}
+          build-contexts: tt-sdk=_tt/sdk
+          build-args: SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ needs.source.outputs.revision }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+          no-cache: ${{ inputs.release }}
+          cache-from: ${{ !inputs.release && format('type=gha,scope={0}-{1}', matrix.target, matrix.arch) || '' }}
+          cache-to: ${{ !inputs.release && format('type=gha,scope={0}-{1},mode=min', matrix.target, matrix.arch) || '' }}
+          provenance: ${{ env.RELEASE == 'true' && 'mode=min' || 'false' }}
+          outputs: ${{ env.IMAGE_OUTPUT }}
+      - name: Select image to test
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          if [[ "$RELEASE" == true ]]; then
+            [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+            echo "TEST_IMAGE=$IMAGE@$DIGEST" >> "$GITHUB_ENV"
+            docker pull --platform "$PLATFORM" "$IMAGE@$DIGEST"
+          else
+            echo "TEST_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          fi
+      - name: Close staging registry session
+        if: always() && inputs.release
+        run: docker logout ghcr.io
+      - name: Exercise online fetch and offline component builds
+        run: |
+          scripts/install-test-runtime.sh "$RUNNER_TEMP/wasmtime"
+          WASMTIME="$RUNNER_TEMP/wasmtime/wasmtime" TT_WASM_CONTAINER_METRICS=1 \
+            scripts/container-smoke.sh "$TARGET" "$TEST_IMAGE"
+      - name: Scan operating system and toolchain dependencies
+        run: |
+          scan_dir=$(mktemp -d)
+          trap 'rm -rf "$scan_dir"' EXIT
+          docker save -o "$scan_dir/image.tar" "$TEST_IMAGE"
+          trivy() {
+            docker run --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+              --tmpfs /tmp:rw,nosuid,nodev,mode=1777 --user "$(id -u):$(id -g)" --env HOME=/tmp \
+              "$@"
+          }
+          trivy --mount "type=bind,src=$scan_dir,dst=/scan" "$TRIVY_IMAGE" \
+            image --cache-dir /scan/cache --no-progress --download-db-only
+          scan() {
+            trivy --network none --mount "type=bind,src=$scan_dir,dst=/scan,readonly" "$TRIVY_IMAGE" \
+              image --input /scan/image.tar --cache-dir /scan/cache --cache-backend memory \
+              --skip-db-update --skip-java-db-update --offline-scan --no-progress --scanners vuln "$@"
+          }
+          scan --severity HIGH,CRITICAL --exit-code 0
+          if [[ "$RELEASE" == true ]]; then
+            scan --severity CRITICAL --ignore-unfixed --exit-code 1
+          fi
+      - name: Record verified digest
+        if: env.RELEASE == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/verified"
+          printf '%s\n' "$TEST_IMAGE" > "$RUNNER_TEMP/verified/$ARCH.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: env.RELEASE == 'true'
+        with:
+          name: verified-${{ matrix.target }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/verified/*.txt
+          if-no-files-found: error
+          overwrite: true
+
+  publish:
+    name: Publish ${{ matrix.target }}
+    if: inputs.release
+    needs: [source, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [c, go, js, python, rust, csharp]
+    env:
+      TARGET: ${{ matrix.target }}
+      REVISION: ${{ needs.source.outputs.revision }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.source.outputs.revision }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
+          version: v0.30.1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: verified-${{ matrix.target }}-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/verified
+      - name: Publish immutable release index
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io' EXIT
+          image="ghcr.io/${GITHUB_REPOSITORY,,}-builder-$TARGET"
+          mkdir -p "$RUNNER_TEMP/published"
+          scripts/publish-builder-image.sh "$image" "$GITHUB_REF_NAME" "$REVISION" \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$TARGET" "$RUNNER_TEMP/verified" \
+            > "$RUNNER_TEMP/published/$TARGET.json"
+          jq -r '"- `" + .reference + "`"' "$RUNNER_TEMP/published/$TARGET.json" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: published-${{ matrix.target }}
+          path: ${{ runner.temp }}/published/*.json
+          if-no-files-found: error
+          overwrite: true
+
+  release-manifest:
+    name: Record release image digests
+    if: inputs.release
+    needs: [source, publish]
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: published-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/published
+      - name: Assemble the release manifest
+        env:
+          REVISION: ${{ needs.source.outputs.revision }}
+        run: |
+          jq -se --arg version "$GITHUB_REF_NAME" --arg revision "$REVISION" '
+            if (map(.target) | sort) != ["c", "csharp", "go", "js", "python", "rust"]
+                or any(.[]; .version != $version or .revision != $revision)
+            then error("Incomplete or inconsistent image records")
+            else {version: $version, revision: $revision, images: sort_by(.target)}
+            end
+          ' "$RUNNER_TEMP"/published/*.json > builder-images.json
+          jq -r '.images[] | "- `" + .reference + "`"' builder-images.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: builder-images-${{ github.ref_name }}
+          path: builder-images.json
+          if-no-files-found: error
+          overwrite: true

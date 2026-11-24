@@ -1,0 +1,13 @@
+{
+  "name": "tt-wasm-js-toolchain",
+  "private": true,
+  "dependencies": {
+    "@bytecodealliance/componentize-js": "0.23.0",
+    "@bytecodealliance/jco": "1.37.0",
+    "@bytecodealliance/preview2-shim": "0.17.8",
+    "prettier": "3.10.1"
+  },
+  "overrides": {
+    "@bytecodealliance/componentize-js": "0.23.0"
+  }
+}

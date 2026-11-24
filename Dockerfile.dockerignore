@@ -6,3 +6,11 @@
 !internal/component/
 !internal/component/driver/
 !internal/component/driver/**
+!docker/
+!docker/toolchains.sh
+!docker/js/
+!docker/js/package.json
+!docker/js/package-lock.json
+!docker/python-requirements.lock
+!docker/install-debs.sh
+!docker/js/wizer.sh

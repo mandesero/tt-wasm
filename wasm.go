@@ -92,7 +92,7 @@ func newPrepareCmd(services sdk.Services) *cobra.Command {
 	flags.StringVar(&prepare.options.Platform, "platform", "", "Docker builder platform")
 	flags.StringVar(&prepare.options.Context, "context", "", "Docker context")
 	flags.StringVar(&prepare.options.Image, "image", "",
-		"locally built Docker image for development")
+		"Docker builder image digest or a locally built image for development")
 	flags.BoolVar(&prepare.options.Update, "update", false, "update locked WebAssembly profiles")
 	flags.StringVar(&prepare.from, "from", "",
 		"pack this local runtime build into "+wasm.RegistryDir)
