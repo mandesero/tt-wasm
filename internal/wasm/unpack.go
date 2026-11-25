@@ -20,6 +20,7 @@ const (
 	maxTreeSize = 4 << 30
 	// ownerWrite lets tt replace a file it unpacked read-only.
 	ownerWrite os.FileMode = 0o600
+	sdkWITDir              = "wit"
 )
 
 var (
@@ -28,6 +29,7 @@ var (
 	errUnsafeEntry = errors.New("unsafe archive entry")
 	// errTreeTooLarge reports an archive that unpacks to more than maxTreeSize.
 	errTreeTooLarge = errors.New("the archive unpacks to too much")
+	errNoSDKWIT     = errors.New("the SDK archive does not contain a WIT directory")
 )
 
 // unpackTree unpacks the .tar.gz archive into dest, its top directory
@@ -36,10 +38,28 @@ var (
 // inside the tree and hard links are unpacked; an entry that would land
 // outside dest fails the whole unpacking.
 func unpackTree(archive []byte, dest string) error {
+	return unpack(archive, dest, true)
+}
+
+func unpackLocalSDK(archive []byte, dest string) error {
+	if err := unpack(archive, dest, false); err != nil {
+		return err
+	}
+
+	info, err := os.Stat(filepath.Join(dest, sdkWITDir))
+	if errors.Is(err, os.ErrNotExist) || err == nil && !info.IsDir() {
+		return errNoSDKWIT
+	}
+
+	return err
+}
+
+func unpack(archive []byte, dest string, allowLinks bool) error {
 	compressed, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
 		return fmt.Errorf("reading the archive: %w", err)
 	}
+	defer func() { _ = compressed.Close() }()
 
 	reader := tar.NewReader(compressed)
 
@@ -62,6 +82,9 @@ func unpackTree(archive []byte, dest string) error {
 
 		if rel == "" {
 			continue
+		}
+		if !allowLinks && (header.Typeflag == tar.TypeSymlink || header.Typeflag == tar.TypeLink) {
+			return fmt.Errorf("%w: links in a local SDK archive: %s", errUnsafeEntry, header.Name)
 		}
 
 		target := filepath.Join(dest, filepath.FromSlash(rel))

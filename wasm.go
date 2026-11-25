@@ -67,7 +67,7 @@ func newPrepareCmd(services sdk.Services) *cobra.Command {
 		services: services,
 		options: component.PrepareOptions{
 			Version: "", Language: "", Runner: "", Platform: "", Context: "", Image: "",
-			Update: false,
+			SDKFrom: "", Update: false,
 		},
 		from: "", rockServer: "", registries: nil,
 	}
@@ -96,6 +96,8 @@ func newPrepareCmd(services sdk.Services) *cobra.Command {
 	flags.BoolVar(&prepare.options.Update, "update", false, "update locked WebAssembly profiles")
 	flags.StringVar(&prepare.from, "from", "",
 		"pack this local runtime build into "+wasm.RegistryDir)
+	flags.StringVar(&prepare.options.SDKFrom, "sdk-from", "",
+		"use this local Tarantool Wasm SDK archive for the selected languages")
 	flags.StringVar(&prepare.rockServer, "rock-server", "",
 		"rock server to use for the wasm runtime")
 	flags.StringArrayVar(&prepare.registries, "registry", nil, sdk.RegistryFlagUsage)
@@ -106,6 +108,10 @@ func newPrepareCmd(services sdk.Services) *cobra.Command {
 }
 
 func (c *prepareCmd) run(cmd *cobra.Command, _ []string) error {
+	if cmd.Flags().Changed("sdk-from") && c.options.SDKFrom == "" {
+		return sdk.Errorf(sdk.ExitFailure, "--sdk-from requires an SDK archive path")
+	}
+
 	project := c.services.Project()
 	streams := c.services.Streams().IO()
 

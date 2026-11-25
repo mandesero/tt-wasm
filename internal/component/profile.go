@@ -42,6 +42,7 @@ type PrepareOptions struct {
 	Platform string
 	Context  string
 	Image    string
+	SDKFrom  string
 	Update   bool
 }
 
@@ -54,6 +55,7 @@ type profilePin struct {
 
 type profileLock struct {
 	Components map[string]profilePin `json:"components"`
+	LocalSDKs  map[string]string     `json:"local_sdks,omitempty"`
 }
 
 type localRunners map[string]runner.Settings
@@ -118,6 +120,10 @@ func Prepare(
 	}
 
 	if len(languages) == 0 {
+		if opts.SDKFrom != "" {
+			return errors.New("--sdk-from requires --lang or a declared Wasm component")
+		}
+
 		return nil
 	}
 
@@ -141,6 +147,13 @@ func Prepare(
 		return err
 	}
 
+	if opts.SDKFrom != "" {
+		err = lock.prepareLocalSDK(opts, languages)
+		if err != nil {
+			return err
+		}
+	}
+
 	for _, language := range languages {
 		profile, err := Profile(version, language)
 		if err != nil {
@@ -154,6 +167,7 @@ func Prepare(
 		}
 
 		local[language] = settings
+		sdkSum, _ := lock.sdkFor(language, release)
 
 		for name, cfg := range components {
 			if cfg.Language != language {
@@ -166,7 +180,7 @@ func Prepare(
 			}
 
 			pin := profilePin{
-				Profile: profile, Runtime: version, SDK: release.SDKSHA256, Image: image,
+				Profile: profile, Runtime: version, SDK: sdkSum, Image: image,
 			}
 
 			old := lock.Components[name]
@@ -186,7 +200,7 @@ func Prepare(
 		}
 	}
 
-	if len(components) != 0 {
+	if len(components) != 0 || opts.SDKFrom != "" {
 		err = writeJSON(filepath.Join(root, lockName), lock, lockPerm)
 		if err != nil {
 			return err
@@ -194,6 +208,44 @@ func Prepare(
 	}
 
 	return writeJSON(filepath.Join(root, localName), local, localPerm)
+}
+
+func (lock *profileLock) prepareLocalSDK(opts PrepareOptions, languages []string) error {
+	fetcher := wasm.Fetcher{CacheDir: wasm.DefaultCacheDir()}
+	sum, err := fetcher.ImportSDK(opts.SDKFrom)
+	if err != nil {
+		return err
+	}
+
+	return lock.pinLocalSDK(sum, languages, opts.Update)
+}
+
+func (lock *profileLock) pinLocalSDK(sum string, languages []string, update bool) error {
+	if !update {
+		for _, language := range languages {
+			if old, pinned := lock.LocalSDKs[language]; pinned && old != sum {
+				return fmt.Errorf("%s SDK: %w", language, errProfileChange)
+			}
+		}
+	}
+
+	if lock.LocalSDKs == nil {
+		lock.LocalSDKs = make(map[string]string)
+	}
+
+	for _, language := range languages {
+		lock.LocalSDKs[language] = sum
+	}
+
+	return nil
+}
+
+func (lock profileLock) sdkFor(language string, release wasm.Release) (sum string, local bool) {
+	if sum, local := lock.LocalSDKs[language]; local {
+		return sum, true
+	}
+
+	return release.SDKSHA256, false
 }
 
 func configuredComponents(
@@ -320,7 +372,7 @@ func lockedRuntime(project sdk.Project) (string, error) {
 }
 
 func readProfiles(project string) (profileLock, localRunners, error) {
-	lock := profileLock{Components: nil}
+	lock := profileLock{Components: nil, LocalSDKs: nil}
 
 	err := readOptionalJSON(filepath.Join(project, lockName), &lock)
 	if err != nil {

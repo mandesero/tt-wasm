@@ -49,6 +49,7 @@ type componentState struct {
 	settings runner.Settings
 	cache    string
 	language string
+	localSDK bool
 }
 
 // Status reports the state of a component without preparing it.
@@ -144,7 +145,8 @@ func readComponentState(
 		return componentState{}, err
 	}
 
-	if pin.Profile != profile || cfg.Profile != profile || pin.SDK != release.SDKSHA256 {
+	sdkSum, localSDK := locked.sdkFor(cfg.Language, release)
+	if pin.Profile != profile || cfg.Profile != profile || pin.SDK != sdkSum {
 		return componentState{}, fmt.Errorf("%w: %s", errProfileChange, name)
 	}
 
@@ -188,6 +190,7 @@ func readComponentState(
 
 	return componentState{
 		pin: pin, settings: settings, cache: filepath.Join(cache, key), language: cfg.Language,
+		localSDK: localSDK,
 	}, nil
 }
 
@@ -393,14 +396,7 @@ func fetchDependencies(
 
 	defer func() { _ = os.RemoveAll(staged) }()
 
-	release, err := lookupRelease(state.pin.Runtime)
-	if err != nil {
-		return err
-	}
-
-	fetcher := wasm.Fetcher{CacheDir: wasm.DefaultCacheDir(), Client: nil}
-
-	err = fetcher.FetchSDK(ctx, release, filepath.Join(staged, "sdk"))
+	err = state.fetchSDK(ctx, filepath.Join(staged, "sdk"))
 	if err != nil {
 		return fmt.Errorf("fetching the Tarantool Wasm SDK: %w", err)
 	}
@@ -418,6 +414,20 @@ func fetchDependencies(
 	}
 
 	return replaceTree(state.cache, staged)
+}
+
+func (s componentState) fetchSDK(ctx context.Context, dir string) error {
+	fetcher := wasm.Fetcher{CacheDir: wasm.DefaultCacheDir(), Client: nil}
+	if s.localSDK {
+		return fetcher.FetchLocalSDK(s.pin.SDK, dir)
+	}
+
+	release, err := lookupRelease(s.pin.Runtime)
+	if err != nil {
+		return err
+	}
+
+	return fetcher.FetchSDK(ctx, release, dir)
 }
 
 // replaceTree publishes a complete tree under the project lock, retaining

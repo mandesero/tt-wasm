@@ -2,6 +2,11 @@ package wasm
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -52,6 +57,116 @@ func (f Fetcher) FetchSDK(ctx context.Context, release Release, dir string) erro
 	}
 
 	return unpackTree(archive, dir)
+}
+
+// ImportSDK checks a local SDK archive and stores its bytes in the host cache.
+func (f Fetcher) ImportSDK(path string) (string, error) {
+	if f.CacheDir == "" {
+		return "", errors.New("no host cache directory for a local Tarantool Wasm SDK")
+	}
+
+	archive, err := readSDKArchive(path)
+	if err != nil {
+		return "", fmt.Errorf("reading SDK archive %s: %w", path, err)
+	}
+
+	stage, err := os.MkdirTemp("", "tt-wasm-sdk-*")
+	if err != nil {
+		return "", fmt.Errorf("staging local SDK: %w", err)
+	}
+
+	defer func() { _ = os.RemoveAll(stage) }()
+
+	err = unpackLocalSDK(archive, stage)
+	if err != nil {
+		return "", fmt.Errorf("checking SDK archive %s: %w", path, err)
+	}
+
+	sum := fetch.SHA256(archive)
+	err = storeSDKArchive(f.CacheDir, sum, archive)
+	if err != nil {
+		return "", fmt.Errorf("caching local SDK: %w", err)
+	}
+
+	return sum, nil
+}
+
+// FetchLocalSDK unpacks only the local archive previously imported at sum.
+func (f Fetcher) FetchLocalSDK(sum, dir string) error {
+	digest, err := hex.DecodeString(sum)
+	if err != nil || len(digest) != sha256.Size || hex.EncodeToString(digest) != sum {
+		return fmt.Errorf("invalid local SDK SHA-256 %q in wasm.lock.json", sum)
+	}
+
+	if f.CacheDir == "" {
+		return fmt.Errorf("local SDK %s has no host cache; run tt wasm prepare --lang LANG --sdk-from ARCHIVE", sum)
+	}
+
+	archive, err := readSDKArchive(filepath.Join(f.CacheDir, sum))
+	if err == nil && fetch.SHA256(archive) != sum {
+		err = ErrChecksum
+	}
+
+	if err != nil {
+		return fmt.Errorf("local SDK %s is missing or invalid in the host cache; "+
+			"run tt wasm prepare --lang LANG --sdk-from ARCHIVE: %w", sum, err)
+	}
+
+	return unpackLocalSDK(archive, dir)
+}
+
+func readSDKArchive(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("expected a regular SDK archive file")
+	}
+
+	if info.Size() > maxAssetSize {
+		return nil, fetch.ErrTooLarge
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = file.Close() }()
+
+	archive, err := io.ReadAll(io.LimitReader(file, maxAssetSize+1))
+	if err != nil {
+		return nil, err
+	}
+
+	if len(archive) > maxAssetSize {
+		return nil, fetch.ErrTooLarge
+	}
+
+	return archive, nil
+}
+
+func storeSDKArchive(dir, sum string, archive []byte) error {
+	err := os.MkdirAll(dir, dirPerm)
+	if err != nil {
+		return err
+	}
+
+	file, err := os.CreateTemp(dir, ".sdk-*")
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = os.Remove(file.Name()) }()
+
+	_, err = file.Write(archive)
+	if err := errors.Join(err, file.Close()); err != nil {
+		return err
+	}
+
+	return os.Rename(file.Name(), filepath.Join(dir, sum))
 }
 
 // FetchURL returns the content at url, checked against sum, its sha256, as

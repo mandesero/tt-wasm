@@ -9,7 +9,25 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mandesero/tt-wasm/internal/component/runner"
+	"github.com/mandesero/tt-wasm/internal/wasm"
 )
+
+func TestLocalSDKSHAChangesOnlySelectedPins(t *testing.T) {
+	var lock profileLock
+	require.NoError(t, lock.pinLocalSDK("python-sdk", []string{"python"}, false))
+	require.NoError(t, lock.pinLocalSDK("js-sdk", []string{"js"}, false))
+	require.NoError(t, lock.pinLocalSDK("python-sdk", []string{"python"}, false))
+
+	err := lock.pinLocalSDK("new-sdk", []string{"go", "python"}, false)
+	require.ErrorIs(t, err, errProfileChange)
+	assert.Equal(t, map[string]string{"python": "python-sdk", "js": "js-sdk"}, lock.LocalSDKs)
+
+	require.NoError(t, lock.pinLocalSDK("new-sdk", []string{"python"}, true))
+	assert.Equal(t, map[string]string{"python": "new-sdk", "js": "js-sdk"}, lock.LocalSDKs)
+	sum, local := lock.sdkFor("go", wasm.Release{SDKSHA256: "release-sdk"})
+	assert.Equal(t, "release-sdk", sum)
+	assert.False(t, local)
+}
 
 func TestDependencyKeyTracksVendoredWIT(t *testing.T) {
 	dir := t.TempDir()
