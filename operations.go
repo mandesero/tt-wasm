@@ -12,6 +12,7 @@ import (
 	"github.com/mandesero/tt-wasm/internal/component"
 	"github.com/mandesero/tt-wasm/internal/wasm"
 	"github.com/tarantool/tt/sdk"
+	"github.com/tarantool/tt/sdk/build"
 )
 
 const (
@@ -26,12 +27,15 @@ type operationCmd struct {
 	runner   string
 	check    bool
 	rebuild  bool
+	fetch    bool
+	dev      bool
 	jobs     int
 }
 
 func newOperationCmd(services sdk.Services, name, description string) *cobra.Command {
 	operation := &operationCmd{
-		services: services, name: name, runner: "", check: false, rebuild: false, jobs: 0,
+		services: services, name: name, runner: "", check: false, rebuild: false,
+		fetch: false, dev: false, jobs: 0,
 	}
 
 	use := name + " [NAME]"
@@ -55,6 +59,8 @@ func newOperationCmd(services sdk.Services, name, description string) *cobra.Com
 		flags.BoolVar(&operation.check, "check", false, "check that bindings are up to date")
 	case opBuild:
 		flags.BoolVar(&operation.rebuild, "rebuild", false, "start with an empty working directory")
+		flags.BoolVar(&operation.fetch, "fetch", false, "fetch locked dependencies before building")
+		flags.BoolVar(&operation.dev, "dev", false, "use the Python development environment in Docker")
 		sdk.AddJobsFlag(cmd, &operation.jobs)
 	}
 
@@ -121,6 +127,19 @@ func (c *operationCmd) run(cmd *cobra.Command, args []string) error {
 	}
 
 	if c.name == opBuild && !help {
+		if c.dev {
+			ctx = component.WithDevelopment(ctx)
+		}
+
+		if c.fetch {
+			for _, name := range names {
+				err = c.runComponent(ctx, project, name, opFetch, nil, false)
+				if err != nil {
+					return fmt.Errorf("fetching dependencies for component %s: %w", name, err)
+				}
+			}
+		}
+
 		_, err := project.Build(ctx, sdk.BuildOptions{
 			Product: "", Components: names, Locked: true, Rebuild: c.rebuild,
 			Registries: nil, ShowOutput: true, Args: toolArgs, Jobs: c.jobs,
@@ -130,7 +149,7 @@ func (c *operationCmd) run(cmd *cobra.Command, args []string) error {
 	}
 
 	for _, name := range names {
-		err = c.runComponent(ctx, project, name, toolArgs, help)
+		err = c.runComponent(ctx, project, name, c.name, toolArgs, help)
 		if err != nil {
 			return fmt.Errorf("component %s: %w", name, err)
 		}
@@ -139,19 +158,14 @@ func (c *operationCmd) run(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func (c *operationCmd) runComponent(ctx context.Context, project sdk.Project, name string,
+func (c *operationCmd) runComponent(ctx context.Context, project sdk.Project, name, operation string,
 	args []string, help bool,
 ) error {
-	facts, configured, err := project.BuildContext(ctx, sdk.BuildContextOptions{
+	facts, wasmBuild, err := wasmBuildContext(ctx, project, sdk.BuildContextOptions{
 		Product: "", Component: name, Locked: true, Args: args, Jobs: c.jobs,
 	})
 	if err != nil {
 		return err
-	}
-
-	wasmBuild, ok := configured.(*component.Build)
-	if !ok {
-		return sdk.Errorf(sdk.ExitFailure, "component has no WebAssembly backend")
 	}
 
 	if c.check {
@@ -160,7 +174,22 @@ func (c *operationCmd) runComponent(ctx context.Context, project sdk.Project, na
 
 	streams := c.services.Streams().IO()
 
-	return wasmBuild.Operate(ctx, facts, c.name, args, help, streams.Out, streams.Err)
+	return wasmBuild.Operate(ctx, facts, operation, args, help, streams.Out, streams.Err)
+}
+
+func wasmBuildContext(ctx context.Context, project sdk.Project, opts sdk.BuildContextOptions,
+) (*build.Context, *component.Build, error) {
+	facts, configured, err := project.BuildContext(ctx, opts)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	wasmBuild, ok := configured.(*component.Build)
+	if !ok {
+		return nil, nil, sdk.Errorf(sdk.ExitFailure, "component has no WebAssembly backend")
+	}
+
+	return facts, wasmBuild, nil
 }
 
 func newCleanCmd(services sdk.Services) *cobra.Command {

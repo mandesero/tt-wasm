@@ -48,7 +48,7 @@ func newWasmCmd(services sdk.Services) *cobra.Command {
 		newDoctorCmd(services), newOperationCmd(services, opFetch, "Fetch locked dependencies"),
 		newOperationCmd(services, opBind, "Generate language bindings from WIT"),
 		newOperationCmd(services, opBuild, "Build one WebAssembly component"),
-		newCleanCmd(services), newRockCmd(services))
+		newToolCmd(services), newCleanCmd(services), newRockCmd(services))
 
 	return cmd
 }

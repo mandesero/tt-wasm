@@ -12,7 +12,6 @@
     <SelfContained>true</SelfContained>
     <IlcExportUnmanagedEntrypoints>true</IlcExportUnmanagedEntrypoints>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <RestoreLockedMode>true</RestoreLockedMode>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>

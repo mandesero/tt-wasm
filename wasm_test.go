@@ -11,6 +11,7 @@ import (
 
 	"github.com/mandesero/tt-wasm"
 	"github.com/tarantool/tt/sdk"
+	"github.com/tarantool/tt/sdk/build"
 	"github.com/tarantool/tt/sdk/sdktest"
 )
 
@@ -258,6 +259,41 @@ func TestBuildUsesThePackageBackend(t *testing.T) {
 		Components: []string{"router"}, Locked: true, ShowOutput: true,
 		Args: []string{"--fast", "value with spaces"},
 	}}, services.Builds())
+}
+
+func TestBuildFetchDoesNotPassBuildArgumentsToFetch(t *testing.T) {
+	t.Parallel()
+
+	man := declaring(defaultRockServer)
+	man.Components["router"] = sdk.ManifestComponent{
+		Path: "router", Build: &sdk.ManifestBuild{Backend: "wasm"},
+	}
+	contextErr := errors.New("test build context failure")
+	for _, tc := range []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{name: "build", args: []string{"--fast", "value with spaces"}, want: nil},
+		{name: "compiler help", args: []string{"--help"}, want: []string{"--help"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var contexts []sdk.BuildContextOptions
+			services := sdktest.New(t, sdktest.WithRoot(testProject(t)), sdktest.WithManifest(man),
+				sdktest.WithBuildContext(func(opts sdk.BuildContextOptions) (*build.Context, build.Build, error) {
+					contexts = append(contexts, opts)
+					return nil, nil, contextErr
+				}))
+			args := append([]string{"wasm", "build", "router", "--fetch", "--"}, tc.args...)
+			got := services.RunModule(wasm.New, args...)
+
+			require.ErrorIs(t, got.Err, contextErr)
+			assert.Equal(t, []sdk.BuildContextOptions{{Component: "router", Locked: true, Args: tc.want}}, contexts)
+			assert.Empty(t, services.Builds())
+		})
+	}
 }
 
 // TestRockFrom checks that tt wasm rock --from packs the build as the rock of

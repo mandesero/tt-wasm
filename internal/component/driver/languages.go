@@ -95,7 +95,7 @@ func pythonDriver() languageDriver {
 				"-d", "-w", "-p", "-m", "-i", "-o", "-s"}
 		},
 		locks: []string{"requirements.lock"},
-		cache: []string{"dependencies/python-sdk", "dependencies/site-packages"},
+		cache: []string{"dependencies/python-sdk", PythonPackagesDir},
 	}
 }
 

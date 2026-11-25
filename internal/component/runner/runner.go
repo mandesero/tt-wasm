@@ -143,6 +143,22 @@ func Check(ctx context.Context, settings Settings, language string) error {
 func Run(
 	ctx context.Context, settings Settings, request driver.Request, stdout, stderr io.Writer,
 ) error {
+	return run(ctx, settings, request, "", stdout, stderr)
+}
+
+// RunDevelopment builds with the development Python packages in place of
+// the fetched Python packages. Both are mounted read-only.
+func RunDevelopment(
+	ctx context.Context, settings Settings, request driver.Request, packages string,
+	stdout, stderr io.Writer,
+) error {
+	return run(ctx, settings, request, packages, stdout, stderr)
+}
+
+func run(
+	ctx context.Context, settings Settings, request driver.Request, developmentPackages string,
+	stdout, stderr io.Writer,
+) error {
 	err := settings.validate()
 	if err != nil {
 		return err
@@ -173,6 +189,10 @@ func Run(
 			"--mount", bindMount(request.Work, containerWork, false),
 			"--mount", bindMount(request.Cache, containerCache, !fetch),
 		)
+		if developmentPackages != "" {
+			args = append(args, "--mount", bindMount(developmentPackages,
+				containerCache+"/"+driver.PythonPackagesDir, true))
+		}
 	}
 
 	request.Dir, request.Work, request.Cache = containerComponent, containerWork, containerCache

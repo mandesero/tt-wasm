@@ -22,6 +22,9 @@ const (
 	pythonSDKDir    = "python-sdk"
 	sitePackagesDir = "site-packages"
 
+	// PythonPackagesDir is the package directory in a prepared dependency cache.
+	PythonPackagesDir = dependenciesDir + "/" + sitePackagesDir
+
 	// Python/Tarantool 0.1.0 corrects a socket-errno mapping in the
 	// pinned componentize-py after stripping the component.
 	pythonSocketPatch = "twr_python_sdk/_guest/patch_wasi_socket_errors.py"

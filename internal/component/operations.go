@@ -295,6 +295,10 @@ func checkBuild(ctx context.Context, c *build.Context, b *Build) error {
 		err = state.checkRuntime(version)
 	}
 
+	if err == nil {
+		_, err = state.developmentPackages(ctx, c)
+	}
+
 	if err == nil && !state.fetched() {
 		err = errNotFetched
 	}
@@ -334,12 +338,21 @@ func operate(
 		return runner.Run(ctx, state.settings, req, stdout, stderr)
 	}
 
+	packages, err := state.developmentPackages(ctx, c)
+	if err != nil {
+		return err
+	}
+
 	if operation == driver.Fetch {
 		return fetchDependencies(ctx, state, req, stdout, stderr)
 	}
 
 	if !state.fetched() {
 		return errNotFetched
+	}
+
+	if operation == driver.Build && packages != "" {
+		return runner.RunDevelopment(ctx, state.settings, req, packages, stdout, stderr)
 	}
 
 	err = runner.Run(ctx, state.settings, req, stdout, stderr)
